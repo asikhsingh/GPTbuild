@@ -7,12 +7,12 @@ import time
 batch_size = 32  # how many independent sequences will we process in parallel?
 block_size = 8  # what is the maximum context length for predictions?
 max_iters = 3000
-eval_interval = 300
+eval_interval = 200
 learning_rate = 1e-3
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
 n_embd = 32
-# ------------
+# ---------------
 
 torch.manual_seed(1337)
 start_time = time.time()
@@ -31,7 +31,6 @@ def encode(s): return [stoi[c] for c in s]
 # decoder: take a list of integers, output a string
 def decode(l): return ''.join([itos[i] for i in l])
 
-
 # Train and test splits
 data = torch.tensor(encode(text), dtype=torch.long)
 n = int(0.9*len(data))  # first 90% will be train, rest val
@@ -39,8 +38,6 @@ train_data = data[:n]
 val_data = data[n:]
 
 # data loading
-
-
 def get_batch(split):
     # generate a small batch of data of inputs x and targets y
     data = train_data if split == 'train' else val_data
@@ -49,7 +46,6 @@ def get_batch(split):
     y = torch.stack([data[i+1:i+block_size+1] for i in ix])
     x, y = x.to(device), y.to(device)
     return x, y
-
 
 @torch.no_grad()
 def estimate_loss():
@@ -92,7 +88,6 @@ class Head(nn.Module):
         out = wei @ v # (B,T,T) @ (B,T,C) -> (B,T,C)
         return out
     
-
 class MultiHeadAttention(nn.Module):
     '''multiple heads of self-attention in parallel'''
 
@@ -103,7 +98,34 @@ class MultiHeadAttention(nn.Module):
     def forward(self,x):
         return torch.cat([h(x) for h in self.heads], dim=-1)
 
+class FeedForward(nn.Module):
 
+    def __init__(self, n_embd):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(n_embd, n_embd),
+            nn.ReLU(),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+    
+# Intersperse communication with computation
+    
+# class Block(nn.Module):
+#     ''' Transformer block: communication followed by computation '''
+
+#     def __init__(self, n_embd, n_head):
+#         # n_embd: embedding dimension, n_head: the number of heads we'd like
+#         super().__init__()
+#         head_size = n_embd // n_head
+#         self.sa = MultiHeadAttention(n_head, head_size)
+#         self.ffwd = FeedForward(n_embd)
+
+#     def forward(self, x):
+#         x = self.sa(x)
+#         x = self.ffwd(x)
+#         return x
 
 class BigramLanguageModel(nn.Module):
 
@@ -112,10 +134,15 @@ class BigramLanguageModel(nn.Module):
         # each token directly reads off the logits for the next token from a lookup table
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
+        # self.blocks = nn.Sequential(
+        #     Block(n_embd, n_head=4)
+        #     Block(n_embd, n_head=4)
+        #     Block(n_embd, n_head=4)
+        # )
+        
         self.sa_head = MultiHeadAttention(4, n_embd//4) # i.e. 4 heads of 8-dimensional self-attention
+        self.ffwd = FeedForward(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)
-
-
 
     def forward(self, idx, targets=None):
         B, T = idx.shape
@@ -125,8 +152,8 @@ class BigramLanguageModel(nn.Module):
         pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # (T,C)
         x = tok_emb + pos_emb # (B,T,C)
         x = self.sa_head(x)
+        x = self.ffwd(x)
         logits = self.lm_head(x) # (B,T, vocab_size)
-
 
         if targets is None:
             loss = None
@@ -153,7 +180,6 @@ class BigramLanguageModel(nn.Module):
             # append sampled index to the running sequence
             idx = torch.cat((idx, idx_next), dim=1)  # (B, T+1)
         return idx
-
 
 model = BigramLanguageModel(vocab_size)
 m = model.to(device)
@@ -183,7 +209,6 @@ context = torch.zeros((1, 1), dtype=torch.long, device=device)
 print(decode(m.generate(context, max_new_tokens=1000)[0].tolist()))
 
 print(device)
-
 end_time = time.time()
 elapsed_time = end_time - start_time
 print(f"Total training time: {elapsed_time:.2f} seconds")
