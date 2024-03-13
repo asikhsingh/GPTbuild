@@ -4,21 +4,23 @@ from torch.nn import functional as F
 import time
 
 # hyperparameters
-batch_size = 64  # how many independent sequences will we process in parallel?
-block_size = 256  # what is the maximum context length for predictions?
-max_iters = 6000
+batch_size = 64   # 64 - how many independent sequences will we process in parallel?
+block_size = 256  # 256 what is the maximum context length for predictions?
+max_iters = 5000
 eval_interval = 500
-learning_rate = 3e-4
+learning_rate = 3e-4 # 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
-n_embd = 384
-n_head = 6
-n_layer = 6
+n_embd =  384 # 384
+n_head = 6 # 6
+n_layer = 6 # 6
 dropout = 0.2
 # ---------------
 
 torch.manual_seed(1337)
 start_time = time.time()
+
+
 # wget https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt
 with open('input.txt', 'r', encoding='utf-8') as f:
     text = f.read()
@@ -29,10 +31,12 @@ vocab_size = len(chars)
 # create a mapping from characters to integers
 stoi = {ch: i for i, ch in enumerate(chars)}
 itos = {i: ch for i, ch in enumerate(chars)}
+encode = lambda s:[stoi[c] for c in s]
+decode = lambda l: ''.join([itos[i] for i in l])
 # encoder: take a string, output a list of integers
-def encode(s): return [stoi[c] for c in s]
+# def encode(s): return [stoi[c] for c in s]
 # decoder: take a list of integers, output a string
-def decode(l): return ''.join([itos[i] for i in l])
+# def decode(l): return ''.join([itos[i] for i in l])
 
 # Train and test splits
 data = torch.tensor(encode(text), dtype=torch.long)
@@ -82,10 +86,10 @@ class Head(nn.Module):
 
     def forward(self, x):
         B,T,C = x.shape
-        k = self.key(x) # (B,T,C)
-        q = self.query(x) # (B,T,C)
+        k = self.key(x) # (B,T,hs)
+        q = self.query(x) # (B,T,hs)
         # compute attention scores ("affinities")
-        wei = q @ k.transpose(-2,-1) * C**-0.5 # (B,T,C) @ (B,C,T) -> (B,T,T)
+        wei = q @ k.transpose(-2,-1) * k.shape[-1] **-0.5 # (B,T,C) @ (B,C,T) -> (B,T,T)
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf')) # (B,T,T)
         wei = F.softmax(wei, dim=-1) # (B,T,T)
         wei = self.dropout(wei)
@@ -100,7 +104,7 @@ class MultiHeadAttention(nn.Module):
     def __init__(self, num_heads, head_size):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
-        self.proj = nn.Linear(n_embd, n_embd)
+        self.proj = nn.Linear(head_size*num_heads, n_embd)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self,x):
@@ -138,11 +142,11 @@ class Block(nn.Module):
         self.ln2 = nn.LayerNorm(n_embd)
 
     def forward(self, x):
-        x = self.sa(x)
-        x = self.ffwd(x)
+        x =  x + self.sa(x)
+        x = x + self.ffwd(x)
         return x
 
-class BigramLanguageModel(nn.Module):
+class GPTLanguageModel(nn.Module):
 
     def __init__(self):
         super().__init__()
@@ -160,6 +164,14 @@ class BigramLanguageModel(nn.Module):
         # self.sa_head = MultiHeadAttention(4, n_embd//4) # i.e. 4 heads of 8-dimensional self-attention
         # self.ffwd = FeedForward(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)
+        self.apply(self._init_weights)
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     def forward(self, idx, targets=None):
         B, T = idx.shape
@@ -199,7 +211,7 @@ class BigramLanguageModel(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)  # (B, T+1)
         return idx
 
-model = BigramLanguageModel(vocab_size)
+model = GPTLanguageModel()
 m = model.to(device)
 
 # create a PyTorch optimizer
@@ -208,7 +220,7 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 for iter in range(max_iters):
 
     # every once in a while evaluate the loss on train and val sets
-    if iter % eval_interval == 0:
+    if iter % eval_interval == 0 or iter == max_iters - 1:
         losses = estimate_loss()
         print(
             f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
